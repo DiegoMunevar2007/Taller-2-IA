@@ -5,6 +5,65 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from algorithms.problems_csp import DroneAssignmentCSP
 
+def backtracking_basico(csp: DroneAssignmentCSP, asignados: dict[str, str]) -> dict[str, str] | None:
+    if csp.is_complete(asignados):
+        return asignados
+      
+    variable_sin_asignar = csp.get_unassigned_variables(asignados)[0] # Obtener las variables no asignadas
+    
+    for valor in csp.domains[variable_sin_asignar]:
+        if csp.is_consistent(variable_sin_asignar, valor, asignados): # Verificar si el valor es consistente con las restricciones 
+            csp.assign(variable_sin_asignar, valor, asignados)
+            resultado = backtracking_basico(csp, asignados)
+            if resultado is not None:
+                return resultado
+            csp.unassign(variable_sin_asignar, asignados)
+    return None
+    
+    
+def eliminar_inconsistencias_fw(csp: DroneAssignmentCSP, vecinos: list[str], asignados: dict[str, str]):
+    eliminados = []
+
+    for vecino in vecinos: # Se miran todos los vecinos no asignados, y se eliminan los valores inconsistentes con la asignación actual
+        if vecino not in asignados:
+            for val_vecino in csp.domains[vecino]:
+                prueba = asignados.copy() # Se mantiene una copia de la asignación actual para probar cada valor del vecino
+                prueba[vecino] = val_vecino
+
+                if not csp.is_consistent(vecino, val_vecino, prueba):
+                    csp.domains[vecino].remove(val_vecino)
+                    eliminados.append((vecino, val_vecino))
+
+    return eliminados
+
+
+def restaurar_dominios(csp: DroneAssignmentCSP, eliminados):
+    for var, val in eliminados:
+        csp.domains[var].append(val)
+
+
+def backtracking_forward_checking(csp: DroneAssignmentCSP, asignados: dict[str, str]) -> dict[str, str] | None:
+    if csp.is_complete(asignados):
+        return asignados
+
+    variable = csp.get_unassigned_variables(asignados)[0]
+
+    for valor in csp.domains[variable]:
+      if csp.is_consistent(variable, valor, asignados):
+            csp.assign(variable, valor, asignados)
+
+            vecinos = csp.get_neighbors(variable)
+            eliminados = eliminar_inconsistencias_fw(csp, vecinos, asignados)
+
+            resultado = backtracking_forward_checking(csp, asignados)
+            if resultado is not None:
+                return resultado
+
+            restaurar_dominios(csp, eliminados)
+            csp.unassign(variable, asignados)
+
+    return None
+
 
 def backtracking_search(csp: DroneAssignmentCSP) -> dict[str, str] | None:
     """
@@ -24,8 +83,7 @@ def backtracking_search(csp: DroneAssignmentCSP) -> dict[str, str] | None:
     You can find inspiration in the textbook's pseudocode:
     Artificial Intelligence: A Modern Approach (4th Edition) by Russell and Norvig, Chapter 5: Constraint Satisfaction Problems
     """
-    # TODO: Implement your code here
-    return None
+    return backtracking_basico(csp, {}) # Se usa backtracking_search como una función máscara para llamar a la función recursiva
 
 
 def backtracking_fc(csp: DroneAssignmentCSP) -> dict[str, str] | None:
@@ -40,8 +98,7 @@ def backtracking_fc(csp: DroneAssignmentCSP) -> dict[str, str] | None:
     - Use csp.is_consistent(neighbor, val, assignment) to check if a value is still consistent.
     - Forward checking reduces the search space by detecting failures earlier than basic backtracking.
     """
-    # TODO: Implement your code here
-    return None
+    return backtracking_forward_checking(csp, {})
 
 
 def backtracking_ac3(csp: DroneAssignmentCSP) -> dict[str, str] | None:
@@ -60,7 +117,6 @@ def backtracking_ac3(csp: DroneAssignmentCSP) -> dict[str, str] | None:
       - an ac3 function that manages the queue of arcs to check and calls revise.
       - a backtrack function that integrates AC-3 into the search process.
     """
-    # TODO: Implement your code here
     return None
 
 
@@ -78,3 +134,4 @@ def backtracking_mrv_lcv(csp: DroneAssignmentCSP) -> dict[str, str] | None:
     """
     # TODO: Implement your code here (BONUS)
     return None
+
