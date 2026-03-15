@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
-from algorithms.utils import dijkstra, bfs_distance
+
+from algorithms.utils import bfs_distance, dijkstra
 
 if TYPE_CHECKING:
     from world.game_state import GameState
@@ -40,52 +42,137 @@ def evaluation_function(state: GameState) -> float:
     - Consider edge cases: no pending deliveries, no hunters nearby.
     - A good evaluation function balances delivery progress with hunter avoidance.
     """
+    # Si el juego ya terminó, devolver valores extremos
     if state.is_win():
         return 1000.0
     if state.is_lose():
         return -1000.0
 
-    drone_pos = state.get_drone_position()
-    hunters = state.get_hunter_positions()
-    pending = state.get_pending_deliveries()
-    layout = state.get_layout()
+    # Posición actual del dron
+    posicion_dron = state.get_drone_position()
 
-    value = float(state.get_score())
+    # Si por alguna razón no existe, el estado es terrible
+    if posicion_dron is None:
+        return -1000.0
 
-    # Menos entregas pendientes = mejor
-    value -= 120.0 * len(pending)
+    # Información del mapa y entidades
+    mapa = state.get_layout()
+    entregas_pendientes = state.get_pending_deliveries()
+    posiciones_cazadores = state.get_hunter_positions()
 
-    # Distancia a la entrega más cercana
-    if pending:
-        nearest_delivery = float("inf")
-        for delivery in pending:
-            cost, _ = dijkstra(layout, drone_pos, delivery)
-            if cost < nearest_delivery:
-                nearest_delivery = cost
+    # Valor inicial basado en el score del juego
+    valor = 0.45 * state.get_score()
 
-        if nearest_delivery != float("inf"):
-            value -= 5.0 * nearest_delivery
-            value += 80.0 / (1.0 + nearest_delivery)
+    # Penalización por entregas que aún faltan
+    valor -= 220.0 * len(entregas_pendientes)
+
+    # Variables para guardar las mejores métricas encontradas
+    costo_entrega_cercana = float("inf")
+    pasos_entrega_cercana = float("inf")
+    mejor_margen_entrega = float("-inf")
+    mejor_bonus_seguridad = 0.0
+
+    # Analizar cada entrega pendiente
+    for entrega in entregas_pendientes:
+
+        # Distancia real considerando costos (Dijkstra)
+        costo, _ = dijkstra(mapa, posicion_dron, entrega)
+        costo_entrega_cercana = min(costo_entrega_cercana, costo)
+
+        # Distancia en pasos simples (BFS)
+        pasos_dron = bfs_distance(mapa, posicion_dron, entrega)
+        pasos_entrega_cercana = min(pasos_entrega_cercana, pasos_dron)
+
+        # Distancia del cazador más cercano a esa entrega
+        pasos_cazador = float("inf")
+        for pos in posiciones_cazadores:
+            d = bfs_distance(mapa, pos, entrega, hunter_restricted=True)
+            if d < pasos_cazador:
+                pasos_cazador = d
+                
+        # Diferencia entre cazador y dron
+        margen = pasos_cazador - pasos_dron
+        mejor_margen_entrega = max(mejor_margen_entrega, margen)
+
+        # Bonus si el dron puede llegar antes que los cazadores
+        if pasos_dron < pasos_cazador:
+            bonus = 120.0 / (pasos_dron + 1.0)
+            bonus += 20.0 * min(margen, 3)
+
+            mejor_bonus_seguridad = max(mejor_bonus_seguridad, bonus)
+
+    # --- Evaluar distancia a entregas ---
+
+    if costo_entrega_cercana < float("inf"):
+
+        # Preferir entregas cercanas
+        valor += 130.0 / (costo_entrega_cercana + 1.0)
+
+        # Penalizar si está lejos
+        valor -= 2.0 * costo_entrega_cercana
+
+        # Bonus si está muy cerca
+        if costo_entrega_cercana <= 1:
+            valor += 55.0
+        elif costo_entrega_cercana <= 2:
+            valor += 25.0
+
+    elif entregas_pendientes:
+        # Si hay entregas pero no se pueden alcanzar
+        valor -= 250.0
+
+    # Evaluación usando pasos BFS
+    if pasos_entrega_cercana < float("inf"):
+        valor += 220.0 / (pasos_entrega_cercana + 1.0)
+        valor -= 10.0 * pasos_entrega_cercana
+
+    # --- Evaluar ventaja frente a cazadores ---
+
+    if mejor_margen_entrega > float("-inf"):
+        # Si el dron llega antes
+        if mejor_margen_entrega > 0:
+            valor += 32.0 * min(mejor_margen_entrega, 5)
+
+        # Si los cazadores llegan antes
         else:
-            value -= 200.0
+            valor += 18.0 * max(mejor_margen_entrega, -4)
 
-    # Distancia del cazador más cercano al dron
-    nearest_hunter = float("inf")
-    for hunter_pos in hunters:
-        dist = bfs_distance(layout, hunter_pos, drone_pos, hunter_restricted=True)
-        if dist < nearest_hunter:
-            nearest_hunter = dist
+    # Bonus adicional por entrega segura
+    valor += mejor_bonus_seguridad
 
-    if nearest_hunter != float("inf"):
-        value += 15.0 * min(nearest_hunter, 6)
+    # --- Distancia entre cazadores y dron ---
 
-        if nearest_hunter == 0:
-            value -= 900.0
-        elif nearest_hunter == 1:
-            value -= 400.0
-        elif nearest_hunter == 2:
-            value -= 180.0
+    distancias_cazadores = []
+    for pos in posiciones_cazadores:
+        d = bfs_distance(mapa, pos, posicion_dron, hunter_restricted=True)
+        distancias_cazadores.append(d)
+
+    cazadores_alcanzables = []
+    for d in distancias_cazadores:
+        if d < float("inf"):
+            cazadores_alcanzables.append(d)
+
+    # Si ningún cazador puede alcanzarlo
+    if not cazadores_alcanzables:
+        valor += 10.0
+
     else:
-        value += 100.0
 
-    return max(-1000.0, min(1000.0, value))
+        cazador_mas_cercano = min(cazadores_alcanzables)
+
+        # Penalización fuerte si están demasiado cerca
+        if cazador_mas_cercano <= 1:
+            valor -= 650.0
+        elif cazador_mas_cercano == 2:
+            valor -= 180.0
+        elif cazador_mas_cercano == 3:
+            valor -= 70.0
+        elif cazador_mas_cercano == 4:
+            valor -= 20.0
+        else:
+            valor += 10.0 * min(cazador_mas_cercano, 6)
+        # Bonus por mantener distancia promedio
+        distancia_promedio = sum(cazadores_alcanzables) / len(cazadores_alcanzables)
+        valor += 2.0 * min(distancia_promedio, 6)
+    # Limitar el valor final al rango permitido
+    return max(-1000.0, min(1000.0, valor))

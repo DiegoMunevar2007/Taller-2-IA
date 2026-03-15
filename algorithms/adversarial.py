@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 
 import algorithms.evaluation as evaluation
+from algorithms.utils import bfs_distance
 from world.game import Agent, Directions
 
 if TYPE_CHECKING:
@@ -41,14 +42,16 @@ class RandomAgent(MultiAgentSearchAgent):
         """
         Get a random legal action for the drone.
         """
-        acciones_valid = state.get_acciones_valid(self.index)
-        return random.choice(acciones_valid) if acciones_valid else None
+        legal_actions = state.get_legal_actions(self.index)
+        return random.choice(legal_actions) if legal_actions else None
 
-
+# Implementacion basada en el libro de AIMA, página 305, con mejoras hechas por IA para penalizar acciones STOP en nodos MAX y evitar que el dron se quede quieto sin necesidad.
 class MinimaxAgent(MultiAgentSearchAgent):
     """
     Minimax agent for the drone (MAX) vs hunters (MIN) game.
     """
+
+    STOP_PENALTY = 120.0
 
     def get_action(self, state: GameState) -> Directions | None:
         """
@@ -57,67 +60,82 @@ class MinimaxAgent(MultiAgentSearchAgent):
         Tips:
         - The game tree alternates: drone (MAX) -> hunter1 (MIN) -> hunter2 (MIN) -> ... -> drone (MAX) -> ...
         - Use self.depth to control the search depth. depth=1 means the drone moves once and each hunter moves once.
-        - Use state.get_acciones_valid(agent_index) to get legal actions for a specific agent.
+        - Use state.get_legal_actions(agent_index) to get legal actions for a specific agent.
         - Use state.generate_successor(agent_index, action) to get the successor state after an action.
         - Use state.is_win() and state.is_lose() to check terminal states.
-        - Use state.get_numero_agentes() to get the total number of agents.
+        - Use state.get_num_agents() to get the total number of agents.
         - Use self.evaluation_function(state) to evaluate leaf/terminal states.
-        - The next agent is (agent_index + 1) % numero_agentes. Depth decreases after all agents have moved (full ply).
+        - The next agent is (agent_index + 1) % num_agents. Depth decreases after all agents have moved (full ply).
         - Return the ACTION (not the value) that maximizes the minimax value for the drone.
         """
-        numero_agentes = state.get_numero_agentes()
-
-        def minimax(current_state: GameState, agent_index: int, depth: int) -> float:
-            # Caso base: estado terminal o profundidad agotada
-            if current_state.is_win() or current_state.is_lose() or depth == 0:
-                return self.evaluation_function(current_state)
-
-            acciones_valid = current_state.get_acciones_valid(agent_index)
-            if not acciones_valid:
-                return self.evaluation_function(current_state)
-
-            if agent_index == 0 and Directions.STOP in acciones_valid and len(acciones_valid) > 1:
-                acciones_valid = [a for a in acciones_valid if a != Directions.STOP]
-
-            next_agent = (agent_index + 1) % numero_agentes
-            next_depth = depth - 1 if next_agent == 0 else depth
-
-            # MAX: dron
-            if agent_index == 0:
-                value = float("-inf")
-                for action in acciones_valid:
-                    successor = current_state.generate_successor(agent_index, action)
-                    value = max(value, minimax(successor, next_agent, next_depth))
-                return value
-
-            # MIN: cazadores
-            else:
-                value = float("inf")
-                for action in acciones_valid:
-                    successor = current_state.generate_successor(agent_index, action)
-                    value = min(value, minimax(successor, next_agent, next_depth))
-                return value
-
-
-        acciones_valid = state.get_acciones_valid(0)
-        if not acciones_valid:
+        acciones = state.get_legal_actions(self.index)
+        if not acciones:
             return None
 
-        if Directions.STOP in acciones_valid and len(acciones_valid) > 1:
-            acciones_valid = [a for a in acciones_valid if a != Directions.STOP]
+        mejor_accion = None
+        mejor_valor = float("-inf")
 
-        best_value = float("-inf")
-        best_action = None
+        for accion in acciones:
+            sucesor = state.generate_successor(self.index, accion)
 
-        for action in acciones_valid:
-            successor = state.generate_successor(0, action)
-            value = minimax(successor, 1 % numero_agentes, self.depth)
+            valor = self.minimax_value(
+                sucesor,
+                agente=1,
+                profundidad=self.depth
+            )
+            # Mejora hecha con IA: penalizar acciones STOP en nodos MAX para evitar que el dron se quede quieto sin necesidad.
+            if accion == Directions.STOP:
+                valor -= self.STOP_PENALTY
 
-            if value > best_value or best_action is None:
-                best_value = value
-                best_action = action
+            if valor > mejor_valor:
+                mejor_valor = valor
+                mejor_accion = accion
 
-        return best_action
+        return mejor_accion
+    
+    def minimax_value(self, estado: GameState, agente: int, profundidad: int) -> float:
+            # Caso terminal
+        if estado.is_win() or estado.is_lose() or profundidad == 0:
+            return self.evaluation_function(estado)
+
+        acciones = estado.get_legal_actions(agente)
+
+        if not acciones:
+            return self.evaluation_function(estado)
+
+        num_agentes = estado.get_num_agents()
+        siguiente_agente = (agente + 1) % num_agentes
+        siguiente_profundidad = profundidad - 1 if siguiente_agente == 0 else profundidad
+
+        # Caso MAX (dron)
+        if agente == 0:
+            valor = float("-inf")
+            for accion in acciones:
+                sucesor = estado.generate_successor(agente, accion)
+                valor_hijo = self.minimax_value(
+                    sucesor,
+                    siguiente_agente,
+                    siguiente_profundidad
+                )
+                # Mejora hecha con IA: penalizar acciones STOP en nodos MAX para evitar que el dron se quede quieto sin necesidad.
+                if accion == Directions.STOP:
+                    valor_hijo -= self.STOP_PENALTY
+                valor = max(valor, valor_hijo)
+            return valor
+        # Caso MIN (cazadores)
+        else:
+            valor = float("inf")
+            for accion in acciones:
+                sucesor = estado.generate_successor(agente, accion)
+                valor = min(
+                    valor,
+                    self.minimax_value(
+                        sucesor,
+                        siguiente_agente,
+                        siguiente_profundidad
+                    )
+                )
+            return valor
 
 class AlphaBetaAgent(MultiAgentSearchAgent):
     """
@@ -125,6 +143,8 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
     MAX node: prune when value > beta (strict).
     MIN node: prune when value < alpha (strict).
     """
+
+    STOP_PENALTY = 120.0
 
     def get_action(self, state: GameState) -> Directions | None:
         """
@@ -140,85 +160,100 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
         - Update beta at MIN nodes: beta = min(beta, value).
         - Pass alpha and beta through the recursive calls.
         """
-        numero_agentes = state.get_numero_agentes()
-
-        def alphabeta(
-            current_state: GameState,
-            agent_index: int,
-            depth: int,
-            alpha: float,
-            beta: float,
-        ) -> float:
-            if current_state.is_win() or current_state.is_lose() or depth == 0:
-                return self.evaluation_function(current_state)
-
-            acciones_valid = current_state.get_acciones_valid(agent_index)
-            if not acciones_valid:
-                return self.evaluation_function(current_state)
-
-            if agent_index == 0 and Directions.STOP in acciones_valid and len(acciones_valid) > 1:
-                acciones_valid = [a for a in acciones_valid if a != Directions.STOP]
-
-            next_agent = (agent_index + 1) % numero_agentes
-            next_depth = depth - 1 if next_agent == 0 else depth
-
-            # MAX: drone
-            if agent_index == 0:
-                value = float("-inf")
-                for action in acciones_valid:
-                    successor = current_state.generate_successor(agent_index, action)
-                    value = max(
-                        value,
-                        alphabeta(successor, next_agent, next_depth, alpha, beta)
-                    )
-
-                    if value > beta:   # strict pruning
-                        return value
-
-                    alpha = max(alpha, value)
-
-                return value
-
-            # MIN: hunters
-            else:
-                value = float("inf")
-                for action in acciones_valid:
-                    successor = current_state.generate_successor(agent_index, action)
-                    value = min(
-                        value,
-                        alphabeta(successor, next_agent, next_depth, alpha, beta)
-                    )
-
-                    if value < alpha:   # strict pruning
-                        return value
-
-                    beta = min(beta, value)
-
-                return value
-
-        acciones_valid = state.get_acciones_valid(0)
-        if not acciones_valid:
+        acciones = state.get_legal_actions(self.index)
+        if not acciones:
             return None
-
-        if Directions.STOP in acciones_valid and len(acciones_valid) > 1:
-            acciones_valid = [a for a in acciones_valid if a != Directions.STOP]
-
-        best_value = float("-inf")
-        best_action = None
+        # Se agregan las variables alpha y beta para el algoritmo de poda alfa-beta, y se inicializan con los valores extremos.
         alpha = float("-inf")
         beta = float("inf")
+        mejor_accion = None
+        mejor_valor = float("-inf")
 
-        for action in acciones_valid:
-            successor = state.generate_successor(0, action)
-            value = alphabeta(successor, 1 % numero_agentes, self.depth, alpha, beta)
+        for accion in acciones:
+            sucesor = state.generate_successor(self.index, accion)
+            valor = self.alphabeta_value(
+                sucesor,
+                agente=1,
+                profundidad=self.depth,
+                alpha=alpha,
+                beta=beta,
+            )
 
-            if value > best_value or best_action is None:
-                best_value = value
-                best_action = action
+            # Evitar que el dron se quede quieto sin necesidad penalizando acciones STOP en nodos MAX.
+            if accion == Directions.STOP:
+                valor -= self.STOP_PENALTY
 
-            alpha = max(alpha, best_value)
+            if valor > mejor_valor:
+                mejor_valor = valor
+                mejor_accion = accion
 
-        return best_action
+            alpha = max(alpha, mejor_valor)
+
+        return mejor_accion
+
+    def alphabeta_value( # Equivalente a minimax_value pero con poda alfa-beta
+        self,
+        estado: GameState,
+        agente: int,
+        profundidad: int,
+        alpha: float,
+        beta: float,
+    ) -> float:
+        if estado.is_win() or estado.is_lose() or profundidad == 0:
+            return self.evaluation_function(estado)
+        acciones = estado.get_legal_actions(agente)
+        if not acciones:
+            return self.evaluation_function(estado)
+
+        num_agentes = estado.get_num_agents()
+        siguiente_agente = (agente + 1) % num_agentes
+        siguiente_profundidad = profundidad - 1 if siguiente_agente == 0 else profundidad
+
+        # Nodo MAX (dron)
+        if agente == 0:
+            valor = float("-inf")
+            for accion in acciones:
+                sucesor = estado.generate_successor(agente, accion)
+                valor_hijo = self.alphabeta_value(
+                    sucesor,
+                    siguiente_agente,
+                    siguiente_profundidad,
+                    alpha,
+                    beta,
+                )
+                if accion == Directions.STOP:
+                    valor_hijo -= self.STOP_PENALTY
+
+                valor = max(valor, valor_hijo)
+
+                # Hacer poda estricta para MAX: podar solo cuando    value > beta
+                if valor > beta:
+                    return valor
+                # Se actualiza alpha después de procesar un nodo MAX, ya que es el valor mínimo que el nodo MIN superior puede garantizar.
+                alpha = max(alpha, valor)
+            return valor
+
+        # Nodo MIN (cazadores)
+        valor = float("inf")
+        for accion in acciones:
+            sucesor = estado.generate_successor(agente, accion)
+            valor = min(
+                valor,
+                self.alphabeta_value(
+                    sucesor,
+                    siguiente_agente,
+                    siguiente_profundidad,
+                    alpha,
+                    beta,
+                ),
+            )
+            # Hacer poda estricta para MIN: podar solo cuando value < alpha
+            if valor < alpha:
+                return valor
+            # Se actualiza beta después de procesar un nodo MIN, ya que es el valor máximo que el nodo MAX superior puede garantizar.
+            beta = min(beta, valor)
+        return valor
+
 
 class ExpectimaxAgent(MultiAgentSearchAgent):
     """
@@ -262,16 +297,20 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
 
     def _max_value( self, state: GameState, agent_index: int, acciones_valid: list, next_agent: int, next_depth: int) -> float:
         value = float("-inf")
+
         for accion in acciones_valid:
             sig_state = state.generate_successor(agent_index, accion)
             value = max(value, self.expectimax(sig_state, next_agent, next_depth))
+            
         return value
 
     def _chance_value( self, state: GameState, agent_index: int, acciones_valid: list, next_agent: int, next_depth: int) -> float:
         child_values = []
+
         for accion in acciones_valid:
             sig_state = state.generate_successor(agent_index, accion)
             child_values.append(self.expectimax(sig_state, next_agent, next_depth))
+
         greedy_value = min(child_values)
         random_value = sum(child_values) / len(child_values)
         return (1 - self.prob) * greedy_value + self.prob * random_value
