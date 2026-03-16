@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 
 import algorithms.evaluation as evaluation
-from algorithms.utils import bfs_distance
 from world.game import Agent, Directions
 
 if TYPE_CHECKING:
@@ -291,28 +290,28 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         next_depth = depth - 1 if next_agent == 0 else depth
 
         if agent_index == 0:
-            return self._max_value(state, agent_index, acciones_valid, next_agent, next_depth)
-        else:
-            return self._chance_value(state, agent_index, acciones_valid, next_agent, next_depth)
+            return self.max_value(state, agent_index, acciones_valid, next_agent, next_depth)
+        else: # Se tratan los nodos de los cazadores como nodos de probabilidad, aplicando la fórmula del modelo mixto para calcular su valor esperado.
+            return self.chance_value(state, agent_index, acciones_valid, next_agent, next_depth)
 
-    def _max_value( self, state: GameState, agent_index: int, acciones_valid: list, next_agent: int, next_depth: int) -> float:
-        value = float("-inf")
+    def max_value( self, state: GameState, agent_index: int, acciones_valid: list, next_agent: int, next_depth: int) -> float:
+        valor = float("-inf")
 
         for accion in acciones_valid:
-            sig_state = state.generate_successor(agent_index, accion)
-            value = max(value, self.expectimax(sig_state, next_agent, next_depth))
+            sig_estado = state.generate_successor(agent_index, accion)
+            valor = max(valor, self.expectimax(sig_estado, next_agent, next_depth))
             
-        return value
+        return valor
 
-    def _chance_value( self, state: GameState, agent_index: int, acciones_valid: list, next_agent: int, next_depth: int) -> float:
-        child_values = []
+    def chance_value( self, state: GameState, agent_index: int, acciones_valid: list, next_agent: int, next_depth: int) -> float:
+        valores_hijos = []
 
         for accion in acciones_valid:
-            sig_state = state.generate_successor(agent_index, accion)
-            child_values.append(self.expectimax(sig_state, next_agent, next_depth))
+            sig_estado = state.generate_successor(agent_index, accion)
+            valores_hijos.append(self.expectimax(sig_estado, next_agent, next_depth))
 
-        greedy_value = min(child_values)
-        random_value = sum(child_values) / len(child_values)
+        greedy_value = min(valores_hijos)
+        random_value = sum(valores_hijos) / len(valores_hijos)
         return (1 - self.prob) * greedy_value + self.prob * random_value
 
     def get_action(self, state: GameState) -> Directions | None:
@@ -344,8 +343,8 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         best_action = None
 
         for accion in acciones_valid:
-            sig_state = state.generate_successor(0, accion)
-            value = self.expectimax(sig_state, 1 % num_agents, self.depth)
+            sig_estado = state.generate_successor(0, accion)
+            value = self.expectimax(sig_estado, 1 % num_agents, self.depth)
 
             if value > best_value or best_action is None:
                 best_value = value
