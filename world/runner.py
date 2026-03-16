@@ -146,6 +146,22 @@ def run_csp_mode(layout: "DroneLayout", display: CspDisplay, algorithm: str) -> 
         print("\n\u274c No solution found.")
         print("-" * 60)
 
+    if hasattr(csp, "states_visited"):
+        print(f"  Estados visitados: {csp.states_visited}")
+    if hasattr(csp, "states_returned"):
+        print(f"  Estados devueltos: {csp.states_returned}")
+    if hasattr(csp, "backtracks"):
+        print(f"  Backtracks: {csp.backtracks}")
+    if hasattr(csp, "asignaciones"):
+        print(f"  Asignaciones realizadas: {csp.asignaciones}")
+    if hasattr(csp, "constraint_checks"):
+        print(f"  Constraint checks: {csp.constraint_checks}")
+    if hasattr(csp, "domain_prunings"):
+        print(f"  Podas de dominio: {csp.domain_prunings}")
+    if hasattr(csp, "ac3_invocations"):
+        print(f"  Invocaciones AC-3: {csp.ac3_invocations}")
+    if hasattr(csp, "arc_revisions"):
+        print(f"  Revisiones de arcos: {csp.arc_revisions}")
     print(f"\n  Time: {elapsed:.4f}s")
     print("=" * 60)
 
